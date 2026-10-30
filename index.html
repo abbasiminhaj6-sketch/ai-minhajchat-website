@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ur" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Chat | اے آئی چیٹ</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Noto+Nastaliq+Urdu&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f4f6fb; --card: #ffffff; --text: #1c2333; --muted: #6b7385;
+      --primary: #2f6df6; --user: #2f6df6; --user-text: #fff;
+      --bot: #eef1f8; --border: #e1e5ee;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1320; --card: #171c2d; --text: #e8ecf6; --muted: #8f98ad;
+        --primary: #5b8cff; --user: #3d6df0; --bot: #21283d; --border: #2a3250;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: Inter, "Noto Nastaliq Urdu", system-ui, sans-serif;
+      height: 100dvh; display: flex; justify-content: center;
+    }
+    .app {
+      width: 100%; max-width: 760px; height: 100dvh; display: flex; flex-direction: column;
+      background: var(--card); border-inline: 1px solid var(--border);
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 16px; border-bottom: 1px solid var(--border);
+    }
+    header h1 { font-size: 18px; margin: 0; }
+    .tools { display: flex; gap: 8px; }
+    button {
+      font: inherit; cursor: pointer; border: 1px solid var(--border);
+      background: transparent; color: var(--text); padding: 6px 12px; border-radius: 10px;
+    }
+    button:hover { border-color: var(--primary); }
+    #messages {
+      flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .msg {
+      max-width: 82%; padding: 10px 14px; border-radius: 16px; line-height: 1.9;
+      white-space: pre-wrap; word-wrap: break-word; unicode-bidi: plaintext;
+    }
+    .msg.user { align-self: flex-start; background: var(--user); color: var(--user-text); border-end-start-radius: 4px; }
+    .msg.bot  { align-self: flex-end; background: var(--bot); border-end-end-radius: 4px; }
+    .msg.error { background: #ffe5e5; color: #a11; }
+    .empty { margin: auto; text-align: center; color: var(--muted); line-height: 2; }
+    form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--border); }
+    textarea {
+      flex: 1; resize: none; font: inherit; padding: 10px 12px; border-radius: 12px;
+      border: 1px solid var(--border); background: var(--bg); color: var(--text);
+      max-height: 140px; unicode-bidi: plaintext;
+    }
+    textarea:focus { outline: 2px solid var(--primary); border-color: transparent; }
+    #send { background: var(--primary); color: #fff; border: none; padding: 0 20px; }
+    #send:disabled { opacity: .5; cursor: not-allowed; }
+    .dots span { animation: blink 1.2s infinite; }
+    .dots span:nth-child(2) { animation-delay: .2s; }
+    .dots span:nth-child(3) { animation-delay: .4s; }
+    @keyframes blink { 0%, 80%, 100% { opacity: .2; } 40% { opacity: 1; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1 id="title"></h1>
+      <div class="tools">
+        <button id="langBtn"></button>
+        <button id="clearBtn"></button>
+      </div>
+    </header>
+
+    <div id="messages"></div>
+
+    <form id="form">
+      <textarea id="input" rows="1" required></textarea>
+      <button id="send" type="submit"></button>
+    </form>
+  </div>
+
+  <script>
+    const T = {
+      ur: {
+        dir: "rtl", title: "اے آئی چیٹ", lang: "English", clear: "صاف کریں",
+        placeholder: "اپنا پیغام لکھیں…", send: "بھیجیں",
+        empty: "السلام علیکم! 👋\nکچھ بھی پوچھیں — اردو، رومن اردو یا English میں۔",
+        error: "کچھ مسئلہ آ گیا۔ دوبارہ کوشش کریں۔",
+      },
+      en: {
+        dir: "ltr", title: "AI Chat", lang: "اردو", clear: "Clear",
+        placeholder: "Type your message…", send: "Send",
+        empty: "Hello! 👋\nAsk me anything — in Urdu, Roman Urdu or English.",
+        error: "Something went wrong. Please try again.",
+      },
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const box = $("messages"), form = $("form"), input = $("input"), sendBtn = $("send");
+
+    let lang = localStorage.getItem("lang") || "ur";
+    let history = [];
+    try { history = JSON.parse(localStorage.getItem("history") || "[]"); } catch {}
+
+    function applyLang() {
+      const t = T[lang];
+      document.documentElement.lang = lang;
+      document.documentElement.dir = t.dir;
+      $("title").textContent = t.title;
+      $("langBtn").textContent = t.lang;
+      $("clearBtn").textContent = t.clear;
+      input.placeholder = t.placeholder;
+      sendBtn.textContent = t.send;
+      if (!history.length) renderEmpty();
+    }
+
+    function renderEmpty() {
+      box.innerHTML = "";
+      const d = document.createElement("div");
+      d.className = "empty";
+      d.textContent = T[lang].empty;
+      box.appendChild(d);
+    }
+
+    function addMsg(role, text, extra = "") {
+      const empty = box.querySelector(".empty");
+      if (empty) empty.remove();
+      const d = document.createElement("div");
+      d.className = `msg ${role} ${extra}`;
+      d.textContent = text; // textContent => XSS se mehfooz
+      box.appendChild(d);
+      box.scrollTop = box.scrollHeight;
+      return d;
+    }
+
+    function save() { localStorage.setItem("history", JSON.stringify(history.slice(-40))); }
+
+    function restore() {
+      box.innerHTML = "";
+      if (!history.length) return renderEmpty();
+      history.forEach((m) => addMsg(m.role === "user" ? "user" : "bot", m.content));
+    }
+
+    $("langBtn").onclick = () => {
+      lang = lang === "ur" ? "en" : "ur";
+      localStorage.setItem("lang", lang);
+      applyLang();
+    };
+
+    $("clearBtn").onclick = () => { history = []; save(); renderEmpty(); };
+
+    input.addEventListener("input", () => {
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 140) + "px";
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+
+      input.value = ""; input.style.height = "auto";
+      history.push({ role: "user", content: text });
+      addMsg("user", text);
+
+      const typing = addMsg("bot", "");
+      typing.innerHTML = '<span class="dots"><span>●</span><span>●</span><span>●</span></span>';
+      sendBtn.disabled = true;
+
+      try {
+        const r = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: history }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "error");
+        typing.textContent = data.reply;
+        history.push({ role: "assistant", content: data.reply });
+        save();
+      } catch (err) {
+        typing.textContent = err.message && err.message !== "error" ? err.message : T[lang].error;
+        typing.classList.add("error");
+        history.pop(); // fail hone wala user message wapis nikaal dein
+      } finally {
+        sendBtn.disabled = false;
+        box.scrollTop = box.scrollHeight;
+        input.focus();
+      }
+    });
+
+    applyLang();
+    restore();
+  </script>
+</body>
+</html>
